@@ -218,6 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+<<<<<<< HEAD
 
 
 
@@ -235,3 +236,5 @@ get-docker.sh
 
 
 
+=======
+>>>>>>> 1f9155f2dbdb26e01c279e39945aa14fe4a3f7df
