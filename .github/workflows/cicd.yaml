@@ -1,3 +1,4 @@
+
 name: Streamlit AWS CI/CD
 
 on:
@@ -6,11 +7,8 @@ on:
       - main
     paths-ignore:
       - "README.md"
-
-  # Allows you to run the workflow manually
   workflow_dispatch:
 
-# Prevent two deployments from running at the same time
 concurrency:
   group: agentic-chatbot-production
   cancel-in-progress: true
@@ -19,9 +17,7 @@ permissions:
   contents: read
 
 jobs:
-  # ============================================================
   # 1. CONTINUOUS INTEGRATION
-  # ============================================================
   integration:
     name: Continuous Integration
     runs-on: ubuntu-latest
@@ -31,17 +27,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Lint code
-        run: |
-          echo "Linting repository"
+        run: echo "Linting repository"
 
       - name: Run unit tests
-        run: |
-          echo "Running unit tests"
+        run: echo "Running unit tests"
 
-
-  # ============================================================
-  # 2. BUILD AND PUSH IMAGE TO DOCKER HUB
-  # ============================================================
+  # 2. BUILD AND PUSH TO DOCKER HUB
   push_to_registry:
     name: Build and Push Docker Image
     needs: integration
@@ -53,20 +44,19 @@ jobs:
 
       - name: Validate Docker image settings
         env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           IMAGE_NAME: ${{ secrets.IMAGE_NAME }}
         run: |
-          if [ -z "$DOCKER_USERNAME" ]; then
-            echo "DOCKER_USERNAME secret is missing."
-            exit 1
-          fi
-
           if [ -z "$IMAGE_NAME" ]; then
-            echo "IMAGE_NAME secret is missing."
+            echo "::error::IMAGE_NAME secret is missing."
             exit 1
           fi
 
-          echo "Docker image settings are configured."
+          if [ "$IMAGE_NAME" != "agentic-chatbot-using-langgraph" ]; then
+            echo "::error::IMAGE_NAME does not match the expected repository."
+            exit 1
+          fi
+
+          echo "Docker image settings are valid."
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -74,7 +64,7 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
+          username: aakash122
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push Docker image
@@ -84,15 +74,12 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}:main
-            ${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}:sha-${{ github.sha }}
+            aakash122/agentic-chatbot-using-langgraph:main
+            aakash122/agentic-chatbot-using-langgraph:sha-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-
-  # ============================================================
-  # 3. DEPLOY TO AWS EC2 SELF-HOSTED RUNNER
-  # ============================================================
+  # 3. DEPLOY TO AWS EC2
   continuous_deployment:
     name: Deploy to AWS EC2
     needs: push_to_registry
@@ -102,7 +89,7 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
+          username: aakash122
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Validate application secrets
@@ -115,67 +102,44 @@ jobs:
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
         run: |
-          if [ -z "$GOOGLE_API_KEY" ]; then
-            echo "GOOGLE_API_KEY secret is missing."
-            exit 1
-          fi
+          set -eu
 
-          if [ -z "$TAVILY_API_KEY" ]; then
-            echo "TAVILY_API_KEY secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$OPENWEATHER_API_KEY" ]; then
-            echo "OPENWEATHER_API_KEY secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$LANGSMITH_TRACING" ]; then
-            echo "LANGSMITH_TRACING secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$LANGSMITH_ENDPOINT" ]; then
-            echo "LANGSMITH_ENDPOINT secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$LANGSMITH_API_KEY" ]; then
-            echo "LANGSMITH_API_KEY secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$LANGSMITH_PROJECT" ]; then
-            echo "LANGSMITH_PROJECT secret is missing."
-            exit 1
-          fi
+          for key in \
+            GOOGLE_API_KEY \
+            TAVILY_API_KEY \
+            OPENWEATHER_API_KEY \
+            LANGSMITH_TRACING \
+            LANGSMITH_ENDPOINT \
+            LANGSMITH_API_KEY \
+            LANGSMITH_PROJECT
+          do
+            eval 'value="${'"$key"'-}"'
+            if [ -z "$value" ]; then
+              echo "::error::$key secret is missing."
+              exit 1
+            fi
+          done
 
           echo "All required application secrets are configured."
 
       - name: Pull latest Docker image
-        env:
-          IMAGE_PATH: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}
         run: |
-          docker pull "${IMAGE_PATH}:main"
+          docker pull aakash122/agentic-chatbot-using-langgraph:main
 
-      - name: Stop and remove existing container
+      - name: Stop existing container
         run: |
           docker rm -f stapp 2>/dev/null || true
 
       - name: Run Streamlit container
         env:
-          IMAGE_PATH: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}
-
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-
           LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
           LANGSMITH_ENDPOINT: ${{ secrets.LANGSMITH_ENDPOINT }}
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
-
         run: |
           docker run -d \
             --restart unless-stopped \
@@ -189,7 +153,7 @@ jobs:
             -e LANGSMITH_ENDPOINT \
             -e LANGSMITH_API_KEY \
             -e LANGSMITH_PROJECT \
-            "${IMAGE_PATH}:main"
+            aakash122/agentic-chatbot-using-langgraph:main
 
       - name: Verify container is running
         run: |
@@ -199,7 +163,6 @@ jobs:
             --filter "name=^stapp$" \
             --filter "status=running" \
             --format "{{.Names}}" | grep -q "^stapp$"; then
-
             echo "The Streamlit container failed to start."
             docker logs stapp || true
             exit 1
@@ -214,7 +177,6 @@ jobs:
             if docker exec stapp python -c \
               "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=5)" \
               >/dev/null 2>&1; then
-
               echo "Streamlit application is healthy."
               exit 0
             fi
@@ -234,5 +196,4 @@ jobs:
 
       - name: Remove unused Docker images
         if: always()
-        run: |
-          docker image prune -f
+        run: docker image prune -f
